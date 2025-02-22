@@ -1,0 +1,1 @@
+echo "Light triggered at $(date)" >> /Users/nathan.pringle/repos/alarm-server/alarm.log

@@ -1,0 +1,54 @@
+openapi: 3.0.3
+info:
+  title: Mobile Alarm API
+  description: API for scheduling a timer on a Raspberry Pi.
+  version: "1.0.0"
+servers:
+  - url: http://localhost:8080
+paths:
+  /schedule:
+    post:
+      summary: Schedule a timer.
+      operationId: scheduleTimer
+      requestBody:
+        description: Timestamp for scheduling the alarm.
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ScheduleRequest"
+      responses:
+        '201':
+          description: Timer scheduled successfully.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScheduleResponse"
+        '400':
+          description: Invalid input.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+components:
+  schemas:
+    ScheduleRequest:
+      type: object
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+      required:
+        - timestamp
+    ScheduleResponse:
+      type: object
+      properties:
+        message:
+          type: string
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+
+
