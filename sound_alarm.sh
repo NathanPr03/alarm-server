@@ -1,1 +1,3 @@
-echo "Alarm triggered at $(date)" >> /Users/nathan.pringle/repos/alarm-server/alarm.log
+#!/bin/bash
+
+play ./file_example_WAV_1MG.wav
