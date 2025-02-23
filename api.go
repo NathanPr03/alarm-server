@@ -169,6 +169,7 @@ func (server *Server) UploadSoundHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	contextLogger.Info("Sound uploaded successfully", zap.String("filename", header.Filename))
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(SoundResponse{Message: "Sound uploaded successfully", Filename: header.Filename})
@@ -198,6 +199,7 @@ func (server *Server) ListSoundsHandler(w http.ResponseWriter, r *http.Request) 
 		sounds = append(sounds, filename)
 	}
 
+	contextLogger.Info("Sounds fetched successfully", zap.Int("count", len(sounds)))
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(SoundListResponse{Sounds: sounds})
 }
