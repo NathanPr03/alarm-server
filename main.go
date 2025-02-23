@@ -2,7 +2,6 @@ package main
 
 import (
 	"go.uber.org/zap"
-	"log"
 	"net/http"
 )
 
@@ -12,16 +11,17 @@ func main() {
 		zap.AddStacktrace(zap.ErrorLevel),
 	)
 
-	server := &Server{
-		logger: logger,
+	server, err := NewServer(logger)
+	if err != nil {
+		logger.Error("Failed to create server", zap.Error(err))
 	}
 
 	defer logger.Sync()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/schedule", server.ScheduleHandler)
 
-	log.Println("Server starting on :8080")
+	logger.Info("Started server on :8080")
 	if err := http.ListenAndServe(":8080", mux); err != nil {
-		log.Fatalf("Server failed: %v", err)
+		logger.Error("Server creating failed", zap.Error(err))
 	}
 }

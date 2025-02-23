@@ -1,16 +1,30 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
+	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
 	"go.uber.org/zap"
 )
 
+type SoundResponse struct {
+	Message  string `json:"message"`
+	Filename string `json:"filename"`
+}
+
+type SoundListResponse struct {
+	Sounds []string `json:"sounds"`
+}
+
 type ScheduleRequest struct {
-	Timestamp string `json:"timestamp"`
+	Timestamp     string `json:"timestamp"`
+	SoundFileName string `json:"sound"`
 }
 
 type ScheduleResponse struct {
@@ -21,39 +35,61 @@ type Server struct {
 	sync.Mutex
 	alarmTimer *time.Timer
 	lightTimer *time.Timer
+	db         *sql.DB
+	soundDir   string
 	logger     *zap.Logger
 }
 
+func NewServer(logger *zap.Logger) (*Server, error) {
+	db, err := sql.Open("sqlite3", "./sounds.db")
+	if err != nil {
+		return nil, err
+	}
+
+	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS sounds (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		filename TEXT UNIQUE
+	)`)
+	if err != nil {
+		return nil, err
+	}
+
+	soundDir := "sounds"
+	if err := os.MkdirAll(soundDir, 0755); err != nil {
+		return nil, err
+	}
+
+	return &Server{
+		logger:   logger,
+		db:       db,
+		soundDir: soundDir,
+	}, nil
+}
+
 func (server *Server) ScheduleHandler(w http.ResponseWriter, r *http.Request) {
-	contextLogger := server.logger.With(zap.Any("method", r.Method))
-	contextLogger = contextLogger.With(zap.String("url", r.URL.String()))
-	contextLogger = contextLogger.With(zap.String("remoteAddress", r.RemoteAddr))
+	contextLogger := server.logger.With(zap.String("url", r.URL.String()))
 
 	if r.Method != http.MethodPost {
-		contextLogger.Warn("Method not allowed")
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
 	var req ScheduleRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		contextLogger.Warn("Invalid JSON")
 		http.Error(w, "Invalid JSON", http.StatusBadRequest)
 		return
 	}
 
-	contextLogger = contextLogger.With(zap.Any("requestBody", req))
+	contextLogger = contextLogger.With(zap.String("timestamp", req.Timestamp), zap.String("sound", req.SoundFileName))
 
 	scheduleTime, err := time.Parse(time.RFC3339, req.Timestamp)
 	if err != nil {
-		contextLogger.Warn("Invalid timestamp format")
 		http.Error(w, "Invalid timestamp format. Use RFC3339.", http.StatusBadRequest)
 		return
 	}
 
 	alarmDuration := time.Until(scheduleTime)
 	if alarmDuration <= 0 {
-		contextLogger.Warn("Timestamp must be in the future")
 		http.Error(w, "Timestamp must be in the future", http.StatusBadRequest)
 		return
 	}
@@ -62,33 +98,89 @@ func (server *Server) ScheduleHandler(w http.ResponseWriter, r *http.Request) {
 	lightDuration := time.Until(lightTriggerTime)
 
 	server.Lock()
+	defer server.Unlock()
+
 	// Cancel previous timers if they exist
 	if server.lightTimer != nil {
-		contextLogger.Info("Cancelling previous light timer")
 		server.lightTimer.Stop()
 	}
 	if server.alarmTimer != nil {
-		contextLogger.Info("Cancelling previous alarm timer")
 		server.alarmTimer.Stop()
 	}
 
 	if lightDuration > 0 {
 		server.lightTimer = time.AfterFunc(lightDuration, func() {
 			WhenLightTriggered(contextLogger)
-			contextLogger.Info("Light triggered", zap.String("timestamp", lightTriggerTime.Format(time.RFC3339)))
 		})
-	} else {
-		contextLogger.Warn("Light trigger time is in the past", zap.Int("lightDuration", int(lightDuration.Seconds())))
 	}
 
 	server.alarmTimer = time.AfterFunc(alarmDuration, func() {
-		WhenAlarmTriggered(contextLogger)
-		contextLogger.Info("Alarm triggered", zap.String("timestamp", scheduleTime.Format(time.RFC3339)))
+		WhenAlarmTriggered(contextLogger, req.SoundFileName)
 	})
 
-	server.Unlock()
-
-	contextLogger.Info("Timer scheduled successfully")
 	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(ScheduleResponse{Message: "Timer scheduled successfully"})
+}
+
+func (server *Server) UploadSoundHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		http.Error(w, "Invalid file upload", http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+
+	// Save file to sound directory
+	soundPath := filepath.Join(server.soundDir, header.Filename)
+	outFile, err := os.Create(soundPath)
+	if err != nil {
+		http.Error(w, "Failed to save file", http.StatusInternalServerError)
+		return
+	}
+	defer outFile.Close()
+
+	_, err = io.Copy(outFile, file)
+	if err != nil {
+		http.Error(w, "Failed to write file", http.StatusInternalServerError)
+		return
+	}
+
+	// Store metadata in SQLite
+	_, err = server.db.Exec("INSERT INTO sounds (filename) VALUES (?)", header.Filename)
+	if err != nil {
+		http.Error(w, "Failed to store sound metadata", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(SoundResponse{Message: "Sound uploaded successfully", Filename: header.Filename})
+}
+
+func (server *Server) ListSoundsHandler(w http.ResponseWriter, r *http.Request) {
+	rows, err := server.db.Query("SELECT filename FROM sounds")
+	if err != nil {
+		http.Error(w, "Failed to fetch sounds", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var sounds []string
+	for rows.Next() {
+		var filename string
+		if err := rows.Scan(&filename); err != nil {
+			http.Error(w, "Failed to read sounds", http.StatusInternalServerError)
+			return
+		}
+		sounds = append(sounds, filename)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(SoundListResponse{Sounds: sounds})
 }

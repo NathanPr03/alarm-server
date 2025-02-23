@@ -11,7 +11,7 @@ paths:
       summary: Schedule a timer.
       operationId: scheduleTimer
       requestBody:
-        description: Timestamp for scheduling the alarm.
+        description: Timestamp and selected sound for the alarm.
         required: true
         content:
           application/json:
@@ -30,6 +30,48 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+
+  /sound:
+    post:
+      summary: Upload a new sound file.
+      operationId: uploadSound
+      requestBody:
+        description: Audio file to upload.
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '201':
+          description: Sound uploaded successfully.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SoundResponse"
+        '400':
+          description: Invalid file format or upload failure.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /sounds:
+    get:
+      summary: Get a list of all available sound names.
+      operationId: listSounds
+      responses:
+        '200':
+          description: List of available sounds.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SoundListResponse"
+
 components:
   schemas:
     ScheduleRequest:
@@ -38,17 +80,39 @@ components:
         timestamp:
           type: string
           format: date-time
+        sound:
+          type: string
+          description: The name of the sound to play when the alarm triggers.
       required:
         - timestamp
+        - sound
+
     ScheduleResponse:
       type: object
       properties:
         message:
           type: string
+
+    SoundResponse:
+      type: object
+      properties:
+        message:
+          type: string
+        filename:
+          type: string
+          description: The name of the uploaded sound file.
+
+    SoundListResponse:
+      type: object
+      properties:
+        sounds:
+          type: array
+          items:
+            type: string
+          description: List of available sound file names.
+
     ErrorResponse:
       type: object
       properties:
         error:
           type: string
-
-
