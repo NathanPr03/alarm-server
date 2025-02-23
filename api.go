@@ -40,20 +40,7 @@ type Server struct {
 	logger     *zap.Logger
 }
 
-func NewServer(logger *zap.Logger) (*Server, error) {
-	db, err := sql.Open("sqlite3", "./sounds.db")
-	if err != nil {
-		return nil, err
-	}
-
-	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS sounds (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		filename TEXT UNIQUE
-	)`)
-	if err != nil {
-		return nil, err
-	}
-
+func NewServer(logger *zap.Logger, db *sql.DB) (*Server, error) {
 	soundDir := "sounds"
 	if err := os.MkdirAll(soundDir, 0755); err != nil {
 		return nil, err
@@ -68,19 +55,23 @@ func NewServer(logger *zap.Logger) (*Server, error) {
 
 func (server *Server) ScheduleHandler(w http.ResponseWriter, r *http.Request) {
 	contextLogger := server.logger.With(zap.String("url", r.URL.String()))
+	contextLogger = contextLogger.With(zap.String("method", r.Method))
 
 	if r.Method != http.MethodPost {
+		contextLogger.Warn("Method not allowed")
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
 	var req ScheduleRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		contextLogger.Warn("Invalid JSON")
 		http.Error(w, "Invalid JSON", http.StatusBadRequest)
 		return
 	}
 
-	contextLogger = contextLogger.With(zap.String("timestamp", req.Timestamp), zap.String("sound", req.SoundFileName))
+	reqMarshalled, _ := json.Marshal(req)
+	contextLogger = contextLogger.With(zap.String("body", string(reqMarshalled)))
 
 	scheduleTime, err := time.Parse(time.RFC3339, req.Timestamp)
 	if err != nil {
@@ -124,13 +115,19 @@ func (server *Server) ScheduleHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (server *Server) UploadSoundHandler(w http.ResponseWriter, r *http.Request) {
+	contextLogger := server.logger.With(zap.String("url", r.URL.String()))
+	contextLogger = contextLogger.With(zap.String("filename", r.Header.Get("Content-Disposition")))
+	contextLogger = contextLogger.With(zap.String("method", r.Method))
+
 	if r.Method != http.MethodPost {
+		contextLogger.Warn("Method not allowed")
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
 	file, header, err := r.FormFile("file")
 	if err != nil {
+		contextLogger.Warn("Invalid file upload")
 		http.Error(w, "Invalid file upload", http.StatusBadRequest)
 		return
 	}
@@ -140,6 +137,7 @@ func (server *Server) UploadSoundHandler(w http.ResponseWriter, r *http.Request)
 	soundPath := filepath.Join(server.soundDir, header.Filename)
 	outFile, err := os.Create(soundPath)
 	if err != nil {
+		contextLogger.Error("Failed to save file", zap.Error(err))
 		http.Error(w, "Failed to save file", http.StatusInternalServerError)
 		return
 	}
@@ -147,6 +145,7 @@ func (server *Server) UploadSoundHandler(w http.ResponseWriter, r *http.Request)
 
 	_, err = io.Copy(outFile, file)
 	if err != nil {
+		contextLogger.Error("Failed to write file", zap.Error(err))
 		http.Error(w, "Failed to write file", http.StatusInternalServerError)
 		return
 	}
@@ -154,6 +153,7 @@ func (server *Server) UploadSoundHandler(w http.ResponseWriter, r *http.Request)
 	// Store metadata in SQLite
 	_, err = server.db.Exec("INSERT INTO sounds (filename) VALUES (?)", header.Filename)
 	if err != nil {
+		contextLogger.Error("Failed to store sound metadata", zap.Error(err))
 		http.Error(w, "Failed to store sound metadata", http.StatusInternalServerError)
 		return
 	}
@@ -164,8 +164,12 @@ func (server *Server) UploadSoundHandler(w http.ResponseWriter, r *http.Request)
 }
 
 func (server *Server) ListSoundsHandler(w http.ResponseWriter, r *http.Request) {
+	contextLogger := server.logger.With(zap.String("url", r.URL.String()))
+	contextLogger = contextLogger.With(zap.String("method", r.Method))
+
 	rows, err := server.db.Query("SELECT filename FROM sounds")
 	if err != nil {
+		contextLogger.Error("Failed to fetch sounds", zap.Error(err))
 		http.Error(w, "Failed to fetch sounds", http.StatusInternalServerError)
 		return
 	}
@@ -175,6 +179,7 @@ func (server *Server) ListSoundsHandler(w http.ResponseWriter, r *http.Request) 
 	for rows.Next() {
 		var filename string
 		if err := rows.Scan(&filename); err != nil {
+			contextLogger.Error("Failed to read sound", zap.String("filename", filename), zap.Error(err))
 			http.Error(w, "Failed to read sounds", http.StatusInternalServerError)
 			return
 		}
