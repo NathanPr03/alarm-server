@@ -110,6 +110,7 @@ func (server *Server) ScheduleHandler(w http.ResponseWriter, r *http.Request) {
 		WhenAlarmTriggered(contextLogger, req.SoundFileName)
 	})
 
+	contextLogger.Info("Timer scheduled successfully", zap.Time("alarmTime", scheduleTime))
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(ScheduleResponse{Message: "Timer scheduled successfully"})
