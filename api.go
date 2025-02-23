@@ -56,6 +56,7 @@ func NewServer(logger *zap.Logger, db *sql.DB) (*Server, error) {
 func (server *Server) ScheduleHandler(w http.ResponseWriter, r *http.Request) {
 	contextLogger := server.logger.With(zap.String("url", r.URL.String()))
 	contextLogger = contextLogger.With(zap.String("method", r.Method))
+	contextLogger = contextLogger.With(zap.String("endpoint", "schedule"))
 
 	if r.Method != http.MethodPost {
 		contextLogger.Warn("Method not allowed")
@@ -118,6 +119,7 @@ func (server *Server) UploadSoundHandler(w http.ResponseWriter, r *http.Request)
 	contextLogger := server.logger.With(zap.String("url", r.URL.String()))
 	contextLogger = contextLogger.With(zap.String("filename", r.Header.Get("Content-Disposition")))
 	contextLogger = contextLogger.With(zap.String("method", r.Method))
+	contextLogger = contextLogger.With(zap.String("endpoint", "sound"))
 
 	if r.Method != http.MethodPost {
 		contextLogger.Warn("Method not allowed")
@@ -150,7 +152,16 @@ func (server *Server) UploadSoundHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Store metadata in SQLite
+	var existingFilename string
+	err = server.db.QueryRow("SELECT filename FROM sounds WHERE filename = ?", header.Filename).Scan(&existingFilename)
+	if err == nil {
+		contextLogger.Warn("File already exists, skipping upload", zap.String("filename", header.Filename))
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(SoundResponse{Message: "Sound already exists", Filename: header.Filename})
+		return
+	}
+
 	_, err = server.db.Exec("INSERT INTO sounds (filename) VALUES (?)", header.Filename)
 	if err != nil {
 		contextLogger.Error("Failed to store sound metadata", zap.Error(err))
@@ -166,6 +177,7 @@ func (server *Server) UploadSoundHandler(w http.ResponseWriter, r *http.Request)
 func (server *Server) ListSoundsHandler(w http.ResponseWriter, r *http.Request) {
 	contextLogger := server.logger.With(zap.String("url", r.URL.String()))
 	contextLogger = contextLogger.With(zap.String("method", r.Method))
+	contextLogger = contextLogger.With(zap.String("endpoint", "sounds"))
 
 	rows, err := server.db.Query("SELECT filename FROM sounds")
 	if err != nil {

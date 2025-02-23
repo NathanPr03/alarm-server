@@ -47,6 +47,12 @@ paths:
                   type: string
                   format: binary
       responses:
+        '200':
+          description: Sound already exists.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SoundResponse"
         '201':
           description: Sound uploaded successfully.
           content:
