@@ -11,7 +11,7 @@ if [ -z "$1" ]; then
     exit 1
 fi
 
-SOUND_FILE="$1"
+SOUND_FILE="sounds/$1"
 
 if [ ! -f "$SOUND_FILE" ]; then
     log "❌ Error: File '$SOUND_FILE' not found!"
